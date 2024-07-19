@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	// Uncomment this block to pass the first stage
 	"net"
 	"os"
 )
@@ -18,11 +18,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := l.Accept()
+	conn, err := l.Accept()
 	if err != nil {
 		fmt.Println("Error accepting connection: ", err.Error())
 		os.Exit(1)
 	}
 
-	c.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	b := make([]byte, 1024)
+	conn.Read(b)
+	parts := bytes.Split(b, []byte(" "))
+
+	if string(parts[1]) == "/" {
+		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	} else {
+		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	}
 }
