@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -32,10 +33,17 @@ func main() {
 
 	urlParts := bytes.Split(parts[1], []byte("/"))
 	if string(urlParts[1]) == "echo" {
-		length := len(urlParts[2])
-
-		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", length) + "\r\n\r\n"))
+		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(urlParts[2])) + "\r\n\r\n"))
 		conn.Write(urlParts[2])
+	}
+
+	if string(urlParts[1]) == "user-agent" {
+		for i, part := range parts {
+			if strings.ToLower(string(part)) == "user-agent:" {
+				conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(parts[i+1])) + "\r\n\r\n"))
+				conn.Write(parts[i+1])
+			}
+		}
 	}
 
 	conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
