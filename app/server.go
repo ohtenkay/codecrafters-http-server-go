@@ -16,11 +16,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Failed to accept connection")
+			os.Exit(1)
+		}
+
+		go handlecConnection(conn)
 	}
+}
+
+func handlecConnection(conn net.Conn) {
+	defer conn.Close()
 
 	b := make([]byte, 1024)
 	conn.Read(b)
@@ -30,16 +38,15 @@ func main() {
 	lineParts := strings.Split(line, " ")
 	urlParts := strings.Split(lineParts[1], "/")
 
-	if urlParts[1] == "" {
+	switch urlParts[1] {
+	case "":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	}
 
-	if urlParts[1] == "echo" {
+	case "echo":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(urlParts[2])) + "\r\n\r\n"))
 		conn.Write([]byte(urlParts[2]))
-	}
 
-	if urlParts[1] == "user-agent" {
+	case "user-agent":
 		for _, header := range strings.Split(headers, "\r\n") {
 			headerName, headerValue := splitByFirstOccurrence(header, ": ")
 
@@ -48,9 +55,10 @@ func main() {
 				conn.Write([]byte(headerValue))
 			}
 		}
-	}
 
-	conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	default:
+		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	}
 }
 
 func splitByFirstOccurrence(s, sep string) (string, string) {
