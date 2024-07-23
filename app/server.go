@@ -54,7 +54,7 @@ func handlecConnection(conn net.Conn) {
 			}
 		}
 	case "files":
-		file, err := os.Open(urlParts[2])
+		file, err := os.Open("/tmp/" + urlParts[2])
 		if err != nil {
 			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 			return
