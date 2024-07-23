@@ -8,6 +8,14 @@ import (
 )
 
 func main() {
+	var dirname string
+
+	for i, arg := range os.Args {
+		if arg == "--directory" && i+1 < len(os.Args) {
+			dirname = os.Args[i+1]
+		}
+	}
+
 	fmt.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
@@ -23,11 +31,11 @@ func main() {
 			os.Exit(1)
 		}
 
-		go handlecConnection(conn)
+		go handlecConnection(conn, dirname)
 	}
 }
 
-func handlecConnection(conn net.Conn) {
+func handlecConnection(conn net.Conn, dirname string) {
 	defer conn.Close()
 
 	b := make([]byte, 1024)
@@ -54,7 +62,7 @@ func handlecConnection(conn net.Conn) {
 			}
 		}
 	case "files":
-		file, err := os.Open("/tmp/" + urlParts[2])
+		file, err := os.Open(dirname + urlParts[2])
 		if err != nil {
 			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 			return
