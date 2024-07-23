@@ -41,11 +41,9 @@ func handlecConnection(conn net.Conn) {
 	switch urlParts[1] {
 	case "":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-
 	case "echo":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(urlParts[2])) + "\r\n\r\n"))
 		conn.Write([]byte(urlParts[2]))
-
 	case "user-agent":
 		for _, header := range strings.Split(headers, "\r\n") {
 			headerName, headerValue := splitByFirstOccurrence(header, ": ")
@@ -55,7 +53,20 @@ func handlecConnection(conn net.Conn) {
 				conn.Write([]byte(headerValue))
 			}
 		}
+	case "files":
+		file, err := os.Open(urlParts[2])
+		if err != nil {
+			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			return
+		}
 
+		fileInfo, _ := file.Stat()
+		fileSize := fileInfo.Size()
+		fileContent := make([]byte, fileSize)
+		file.Read(fileContent)
+
+		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fmt.Sprintf("%d", fileSize) + "\r\n\r\n"))
+		conn.Write(fileContent)
 	default:
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
