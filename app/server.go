@@ -84,7 +84,7 @@ func handlecConnection(conn net.Conn, dirname string) {
 				return
 			}
 
-			file.Write([]byte(body))
+			file.Write([]byte(strings.TrimRight(body, "\x00")))
 			file.Close()
 
 			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
