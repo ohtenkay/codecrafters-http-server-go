@@ -41,7 +41,7 @@ func handlecConnection(conn net.Conn, dirname string) {
 	b := make([]byte, 1024)
 	conn.Read(b)
 
-	lineHeaders, _ := splitByFirstOccurrence(string(b), "\r\n\r\n")
+	lineHeaders, body := splitByFirstOccurrence(string(b), "\r\n\r\n")
 	line, headers := splitByFirstOccurrence(lineHeaders, "\r\n")
 	lineParts := strings.Split(line, " ")
 	urlParts := strings.Split(lineParts[1], "/")
@@ -62,19 +62,33 @@ func handlecConnection(conn net.Conn, dirname string) {
 			}
 		}
 	case "files":
-		file, err := os.Open(dirname + urlParts[2])
-		if err != nil {
-			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-			return
+		switch lineParts[0] {
+		case "GET":
+			file, err := os.Open(dirname + urlParts[2])
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+				return
+			}
+
+			fileInfo, _ := file.Stat()
+			fileSize := fileInfo.Size()
+			fileContent := make([]byte, fileSize)
+			file.Read(fileContent)
+
+			conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fmt.Sprintf("%d", fileSize) + "\r\n\r\n"))
+			conn.Write(fileContent)
+		case "POST":
+			file, err := os.Create(dirname + urlParts[2])
+			if err != nil {
+				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+				return
+			}
+
+			file.Write([]byte(body))
+			file.Close()
+
+			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
 		}
-
-		fileInfo, _ := file.Stat()
-		fileSize := fileInfo.Size()
-		fileContent := make([]byte, fileSize)
-		file.Read(fileContent)
-
-		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fmt.Sprintf("%d", fileSize) + "\r\n\r\n"))
-		conn.Write(fileContent)
 	default:
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
