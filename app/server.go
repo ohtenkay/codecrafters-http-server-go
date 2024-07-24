@@ -56,7 +56,7 @@ func newRequest(buff []byte) (*request, error) {
 	for _, header := range bytes.Split(headers, []byte("\r\n")) {
 		headerName, headerValue, found := bytes.Cut(header, []byte(": "))
 		if !found {
-			return nil, fmt.Errorf("bad request")
+			return nil, fmt.Errorf("invalid header" + string(header))
 		}
 
 		request.headers[string(headerName)] = string(headerValue)
@@ -66,12 +66,17 @@ func newRequest(buff []byte) (*request, error) {
 }
 
 type response struct {
+	request    *request
 	statusCode int
 	headers    map[string]string
 	body       []byte
 }
 
 func (r *response) write(conn net.Conn) {
+	if r.request.headers["Accept-Encoding"] == "gzip" {
+		r.headers["Content-Encoding"] = "gzip"
+	}
+
 	conn.Write([]byte("HTTP/1.1 " + fmt.Sprintf("%d", r.statusCode) + " " + statusCodeToText[r.statusCode] + "\r\n"))
 	for key, value := range r.headers {
 		conn.Write([]byte(key + ": " + value + "\r\n"))
@@ -115,16 +120,13 @@ func handlecConnection(conn net.Conn, dirname string) {
 
 	request, err := newRequest(buff)
 	if err != nil {
-		response := &response{
-			statusCode: 400,
-		}
-		response.write(conn)
+		respondBadRequest(conn)
 		return
 	}
 
 	switch string(request.pathParts[1]) {
 	case "":
-		handleRoot(conn)
+		handleRoot(request, conn)
 	case "echo":
 		handleEcho(request, conn)
 	case "user-agent":
@@ -132,12 +134,13 @@ func handlecConnection(conn net.Conn, dirname string) {
 	case "files":
 		handleFiles(request, conn, dirname)
 	default:
-		handleNotFound(conn)
+		respondNotFound(conn)
 	}
 }
 
-func handleRoot(conn net.Conn) {
+func handleRoot(request *request, conn net.Conn) {
 	response := &response{
+		request:    request,
 		statusCode: 200,
 	}
 	response.write(conn)
@@ -145,6 +148,7 @@ func handleRoot(conn net.Conn) {
 
 func handleEcho(request *request, conn net.Conn) {
 	response := &response{
+		request:    request,
 		statusCode: 200,
 		headers: map[string]string{
 			"Content-Type":   "text/plain",
@@ -159,6 +163,7 @@ func handleUserAgent(request *request, conn net.Conn) {
 	for key, value := range request.headers {
 		if strings.ToLower(key) == "user-agent" {
 			response := &response{
+				request:    request,
 				statusCode: 200,
 				headers: map[string]string{
 					"Content-Type":   "text/plain",
@@ -171,10 +176,7 @@ func handleUserAgent(request *request, conn net.Conn) {
 		}
 	}
 
-	response := &response{
-		statusCode: 404,
-	}
-	response.write(conn)
+	respondNotFound(conn)
 }
 
 func handleFiles(request *request, conn net.Conn, dirname string) {
@@ -182,10 +184,7 @@ func handleFiles(request *request, conn net.Conn, dirname string) {
 	case "GET":
 		file, err := os.Open(dirname + string(request.pathParts[2]))
 		if err != nil {
-			response := &response{
-				statusCode: 404,
-			}
-			response.write(conn)
+			respondNotFound(conn)
 			return
 		}
 
@@ -195,6 +194,7 @@ func handleFiles(request *request, conn net.Conn, dirname string) {
 		file.Read(fileContent)
 
 		response := &response{
+			request:    request,
 			statusCode: 200,
 			headers: map[string]string{
 				"Content-Type":   "application/octet-stream",
@@ -206,10 +206,7 @@ func handleFiles(request *request, conn net.Conn, dirname string) {
 	case "POST":
 		file, err := os.Create(dirname + string(request.pathParts[2]))
 		if err != nil {
-			response := &response{
-				statusCode: 500,
-			}
-			response.write(conn)
+			respondInternalServerError(conn)
 			return
 		}
 
@@ -217,15 +214,30 @@ func handleFiles(request *request, conn net.Conn, dirname string) {
 		file.Close()
 
 		response := &response{
+			request:    request,
 			statusCode: 201,
 		}
 		response.write(conn)
 	}
 }
 
-func handleNotFound(conn net.Conn) {
+func respondBadRequest(conn net.Conn) {
+	response := &response{
+		statusCode: 400,
+	}
+	response.write(conn)
+}
+
+func respondNotFound(conn net.Conn) {
 	response := &response{
 		statusCode: 404,
+	}
+	response.write(conn)
+}
+
+func respondInternalServerError(conn net.Conn) {
+	response := &response{
+		statusCode: 500,
 	}
 	response.write(conn)
 }
