@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"net"
 	"os"
@@ -79,6 +80,15 @@ func (r *response) write(conn net.Conn) {
 				for _, encoding := range strings.Split(value, ",") {
 					if strings.TrimSpace(encoding) == "gzip" {
 						r.headers["Content-Encoding"] = "gzip"
+
+						compressedBody, err := compress(r.body)
+						if err != nil {
+							respondInternalServerError(conn)
+							return
+						}
+
+						r.body = compressedBody
+						r.headers["Content-Length"] = fmt.Sprintf("%d", len(r.body))
 						break
 					}
 				}
@@ -260,4 +270,21 @@ func splitLine(line []byte) ([]byte, []byte, []byte, error) {
 	}
 
 	return parts[0], parts[1], parts[2], nil
+}
+
+func compress(data []byte) ([]byte, error) {
+	var buf bytes.Buffer
+
+	gzipWriter := gzip.NewWriter(&buf)
+
+	_, err := gzipWriter.Write(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := gzipWriter.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
