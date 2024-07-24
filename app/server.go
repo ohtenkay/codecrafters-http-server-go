@@ -1,15 +1,87 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 )
 
+var statusCodeToText = map[int]string{
+	200: "OK",
+	201: "Created",
+	400: "Bad Request",
+	404: "Not Found",
+	500: "Internal Server Error",
+}
+
+type request struct {
+	method    string
+	pathParts [][]byte
+	version   string
+	headers   map[string]string
+	body      string
+}
+
+func newRequest(buff []byte) (*request, error) {
+	lineHeaders, body, found := bytes.Cut(buff, []byte("\r\n\r\n"))
+	if !found {
+		return nil, fmt.Errorf("bad request")
+	}
+
+	line, headers, found := bytes.Cut(lineHeaders, []byte("\r\n"))
+	if !found {
+		return nil, fmt.Errorf("bad request")
+	}
+
+	method, path, version, err := splitLine(line)
+	if err != nil {
+		return nil, err
+	}
+
+	pathParts := bytes.Split(path, []byte("/"))
+	if len(pathParts) < 2 {
+		return nil, fmt.Errorf("invlid path")
+	}
+
+	request := &request{
+		method:    string(method),
+		pathParts: pathParts,
+		version:   string(version),
+		headers:   make(map[string]string),
+		body:      string(body),
+	}
+
+	for _, header := range bytes.Split(headers, []byte("\r\n")) {
+		headerName, headerValue, found := bytes.Cut(header, []byte(": "))
+		if !found {
+			return nil, fmt.Errorf("bad request")
+		}
+
+		request.headers[string(headerName)] = string(headerValue)
+	}
+
+	return request, nil
+}
+
+type response struct {
+	statusCode int
+	headers    map[string]string
+	body       []byte
+}
+
+func (r *response) write(conn net.Conn) {
+	conn.Write([]byte("HTTP/1.1 " + fmt.Sprintf("%d", r.statusCode) + " " + statusCodeToText[r.statusCode] + "\r\n"))
+	for key, value := range r.headers {
+		conn.Write([]byte(key + ": " + value + "\r\n"))
+	}
+	conn.Write([]byte("\r\n"))
+	conn.Write(r.body)
+}
+
 func main() {
 	var dirname string
-
 	for i, arg := range os.Args {
 		if arg == "--directory" && i+1 < len(os.Args) {
 			dirname = os.Args[i+1]
@@ -38,63 +110,131 @@ func main() {
 func handlecConnection(conn net.Conn, dirname string) {
 	defer conn.Close()
 
-	b := make([]byte, 1024)
-	conn.Read(b)
+	buff := make([]byte, 1024)
+	conn.Read(buff)
 
-	lineHeaders, body := splitByFirstOccurrence(string(b), "\r\n\r\n")
-	line, headers := splitByFirstOccurrence(lineHeaders, "\r\n")
-	lineParts := strings.Split(line, " ")
-	urlParts := strings.Split(lineParts[1], "/")
+	request, err := newRequest(buff)
+	if err != nil {
+		response := &response{
+			statusCode: 400,
+		}
+		response.write(conn)
+		return
+	}
 
-	switch urlParts[1] {
+	switch string(request.pathParts[1]) {
 	case "":
-		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		handleRoot(conn)
 	case "echo":
-		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(urlParts[2])) + "\r\n\r\n"))
-		conn.Write([]byte(urlParts[2]))
+		handleEcho(request, conn)
 	case "user-agent":
-		for _, header := range strings.Split(headers, "\r\n") {
-			headerName, headerValue := splitByFirstOccurrence(header, ": ")
-
-			if strings.ToLower(headerName) == "user-agent" {
-				conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + fmt.Sprintf("%d", len(headerValue)) + "\r\n\r\n"))
-				conn.Write([]byte(headerValue))
-			}
-		}
+		handleUserAgent(request, conn)
 	case "files":
-		switch lineParts[0] {
-		case "GET":
-			file, err := os.Open(dirname + urlParts[2])
-			if err != nil {
-				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-				return
-			}
-
-			fileInfo, _ := file.Stat()
-			fileSize := fileInfo.Size()
-			fileContent := make([]byte, fileSize)
-			file.Read(fileContent)
-
-			conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + fmt.Sprintf("%d", fileSize) + "\r\n\r\n"))
-			conn.Write(fileContent)
-		case "POST":
-			file, err := os.Create(dirname + urlParts[2])
-			if err != nil {
-				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-				return
-			}
-
-			file.Write([]byte(strings.TrimRight(body, "\x00")))
-			file.Close()
-
-			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
-		}
+		handleFiles(request, conn, dirname)
 	default:
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		handleNotFound(conn)
 	}
 }
 
-func splitByFirstOccurrence(s, sep string) (string, string) {
-	parts := strings.SplitN(s, sep, 2)
-	return parts[0], parts[1]
+func handleRoot(conn net.Conn) {
+	response := &response{
+		statusCode: 200,
+	}
+	response.write(conn)
+}
+
+func handleEcho(request *request, conn net.Conn) {
+	response := &response{
+		statusCode: 200,
+		headers: map[string]string{
+			"Content-Type":   "text/plain",
+			"Content-Length": fmt.Sprintf("%d", len(request.pathParts[2])),
+		},
+		body: request.pathParts[2],
+	}
+	response.write(conn)
+}
+
+func handleUserAgent(request *request, conn net.Conn) {
+	for key, value := range request.headers {
+		if strings.ToLower(key) == "user-agent" {
+			response := &response{
+				statusCode: 200,
+				headers: map[string]string{
+					"Content-Type":   "text/plain",
+					"Content-Length": fmt.Sprintf("%d", len(value)),
+				},
+				body: []byte(value),
+			}
+			response.write(conn)
+			return
+		}
+	}
+
+	response := &response{
+		statusCode: 404,
+	}
+	response.write(conn)
+}
+
+func handleFiles(request *request, conn net.Conn, dirname string) {
+	switch request.method {
+	case "GET":
+		file, err := os.Open(dirname + string(request.pathParts[2]))
+		if err != nil {
+			response := &response{
+				statusCode: 404,
+			}
+			response.write(conn)
+			return
+		}
+
+		fileInfo, _ := file.Stat()
+		fileSize := fileInfo.Size()
+		fileContent := make([]byte, fileSize)
+		file.Read(fileContent)
+
+		response := &response{
+			statusCode: 200,
+			headers: map[string]string{
+				"Content-Type":   "application/octet-stream",
+				"Content-Length": fmt.Sprintf("%d", fileSize),
+			},
+			body: fileContent,
+		}
+		response.write(conn)
+	case "POST":
+		file, err := os.Create(dirname + string(request.pathParts[2]))
+		if err != nil {
+			response := &response{
+				statusCode: 500,
+			}
+			response.write(conn)
+			return
+		}
+
+		file.Write([]byte(request.body))
+		file.Close()
+
+		response := &response{
+			statusCode: 201,
+		}
+		response.write(conn)
+	}
+}
+
+func handleNotFound(conn net.Conn) {
+	response := &response{
+		statusCode: 404,
+	}
+	response.write(conn)
+}
+
+func splitLine(line []byte) ([]byte, []byte, []byte, error) {
+	parts := bytes.Split(line, []byte(" "))
+	if len(parts) != 3 {
+		return nil, nil, nil, fmt.Errorf("invalid line")
+	}
+
+	return parts[0], parts[1], parts[2], nil
 }
