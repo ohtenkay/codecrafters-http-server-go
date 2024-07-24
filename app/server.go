@@ -75,8 +75,14 @@ type response struct {
 func (r *response) write(conn net.Conn) {
 	if r.request != nil {
 		for key, value := range r.request.headers {
-			if strings.ToLower(key) == "accept-encoding" && value == "gzip" {
-				r.headers["Content-Encoding"] = "gzip"
+			if strings.ToLower(key) == "accept-encoding" {
+				for _, encoding := range strings.Split(value, ",") {
+					if strings.TrimSpace(encoding) == "gzip" {
+						r.headers["Content-Encoding"] = "gzip"
+						break
+					}
+				}
+
 				break
 			}
 		}
