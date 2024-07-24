@@ -21,7 +21,7 @@ type request struct {
 	pathParts [][]byte
 	version   string
 	headers   map[string]string
-	body      string
+	body      []byte
 }
 
 func newRequest(buff []byte) (*request, error) {
@@ -50,7 +50,7 @@ func newRequest(buff []byte) (*request, error) {
 		pathParts: pathParts,
 		version:   string(version),
 		headers:   make(map[string]string),
-		body:      string(body),
+		body:      body,
 	}
 
 	for _, header := range bytes.Split(headers, []byte("\r\n")) {
@@ -210,7 +210,7 @@ func handleFiles(request *request, conn net.Conn, dirname string) {
 			return
 		}
 
-		file.Write([]byte(request.body))
+		file.Write(bytes.TrimRight(request.body, "\x00"))
 		file.Close()
 
 		response := &response{
