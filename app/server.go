@@ -73,8 +73,11 @@ type response struct {
 }
 
 func (r *response) write(conn net.Conn) {
-	if r.request.headers["Accept-Encoding"] == "gzip" {
-		r.headers["Content-Encoding"] = "gzip"
+	for key, value := range r.request.headers {
+		if strings.ToLower(key) == "accept-encoding" && value == "gzip" {
+			r.headers["Content-Encoding"] = "gzip"
+			break
+		}
 	}
 
 	conn.Write([]byte("HTTP/1.1 " + fmt.Sprintf("%d", r.statusCode) + " " + statusCodeToText[r.statusCode] + "\r\n"))
